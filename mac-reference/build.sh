@@ -1,0 +1,248 @@
+#!/bin/zsh
+# Builds JUI.app next to this script.
+#
+# Universal (Apple Silicon + Intel) with a macOS 13 floor, so the zip opens on
+# any reasonably recent Mac. An arm64-only or macOS-14-only build fails to
+# launch elsewhere with a bare "the file cannot be opened", which looks like a
+# signing problem but isn't.
+set -e
+cd "$(dirname "$0")"
+
+# --- identity ----------------------------------------------------------------
+# Everything that makes this a distinct app from the shipping JUI lives in these
+# three lines, and nowhere else. The re-JUI branch is a look rebuild: it has to
+# be installable and runnable *beside* the real app without touching its notes,
+# its settings or its Dock tile, so it gets its own name, its own bundle id
+# (hence its own UserDefaults domain and — via CFBundleName — its own vault),
+# and its own build counter so the two branches never fight over one number.
+#
+# Merging this branch back into main means restoring these three values. That is
+# the whole revert, which is why they are hoisted here rather than committed
+# into Info.plist.
+NAME="re-JUI"
+BUNDLE_ID="com.nidhin.jui.re"
+COUNTER="build-number-re"
+ICON="AppIconRe.icns" # copied in as AppIcon.icns; main ships plain AppIcon.icns
+
+APP="$NAME.app"
+ZIP="$NAME.zip"
+DEPLOY_TARGET="13"
+
+rm -rf "$APP" # start clean so no stale resource breaks the signature seal
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp Info.plist "$APP/Contents/Info.plist"
+
+# Every build gets its own CFBundleVersion, so two builds are never
+# indistinguishable when one works and the other doesn't. The user-facing
+# CFBundleShortVersionString in Info.plist is left alone. Stamped before signing:
+# editing Info.plist afterwards would break the signature seal.
+BUILD_NUMBER=$(( $(cat "$COUNTER" 2>/dev/null || echo 0) + 1 ))
+echo "$BUILD_NUMBER" > "$COUNTER"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" \
+  "$APP/Contents/Info.plist" > /dev/null
+
+# The identity above is stamped in here rather than kept in the source
+# Info.plist, so that file stays the canonical description of the real app.
+# CFBundleName is load-bearing beyond the menu bar: NotesStore derives the vault
+# folder from it, so this is also what keeps this build's notes out of JUI's.
+for key in CFBundleName CFBundleDisplayName CFBundleExecutable; do
+  /usr/libexec/PlistBuddy -c "Set :$key $NAME" "$APP/Contents/Info.plist" > /dev/null
+done
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" \
+  "$APP/Contents/Info.plist" > /dev/null
+# There is no loop of individual PNGs here any more, and no PNGs at the repo
+# root to feed one. The rebuild replaced every static mark with the stop-motion
+# flourish below, so Flourish, StickyFlower, FolderSprig, OnboardingLogo,
+# StickyFlourish and FolderFlourish were all still being copied into every
+# bundle with nothing left in the app that drew them. The two remaining kinds of
+# art ship as *directories* — Textures and FlourishFrames — which is also what
+# stops this failing silently: a per-asset list does nothing when someone adds a
+# file and forgets to name it, and on this branch drawing nothing and drawing a
+# very subtle grain look identical.
+
+# The icon is copied separately because this branch ships a different one. It
+# still lands as AppIcon.icns, which is what CFBundleIconFile in Info.plist
+# names — so the source plist stays describing the real app here too.
+cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
+
+# Textures ship as a directory rather than by name. The rebuild adds and drops
+# these constantly, and the old per-asset loop above fails silently when someone
+# adds a file and forgets to list it — the app just draws nothing, on a branch
+# where drawing nothing and drawing a very subtle grain look identical.
+#
+# Art/Vectors and Art/Reference are deliberately not copied: SVG sources are
+# compiled to Swift paths ahead of time, and reference material is for us.
+#
+# The sources are 4096px colour PNGs at ~10MB each — 31MB against an app that
+# was under 1MB. What ships is derived: downsampled, greyscale, JPEG.
+#
+# Greyscale because the textures are neutral by design and the colour channels
+# carry nothing. JPEG because photographic grain is precisely what PNG is worst
+# at, and because the loss it adds is far below the loss the downsample already
+# costs — measured at 0.88 levels of error against 0.81 for lossless at the same
+# size, on a surface multiplied at 50%. A fifth of the size for no visible
+# difference.
+#
+# Cached on modification time: converting three 4096px photographs takes long
+# enough to be irritating on every rebuild, and these change rarely.
+if [ -d Art/Textures ] && [ -n "$(ls -A Art/Textures/*.png 2>/dev/null)" ]; then
+  mkdir -p .texcache "$APP/Contents/Resources/Textures"
+  for src in Art/Textures/*.png; do
+    base=$(basename "$src" .png)
+    out=".texcache/$base.jpg"
+    if [ ! -f "$out" ] || [ "$src" -nt "$out" ]; then
+      # Only the sticky gets a native-resolution *crop*. It is ~170pt across, so
+      # squeezing a whole 2048px sheet into it shrinks the grain twelvefold and
+      # the paper reads as flat colour — which is exactly what it did. A crop
+      # keeps the pixels at their own size, so the stamp shows a window onto the
+      # stock rather than a miniature of it.
+      #
+      # Everything else takes the whole photograph, downsampled, because it is
+      # drawn to cover. The panels went the other way first and came out
+      # blotchy: a crop carries the photograph's large-scale mottling at full
+      # size, and dropping that into a 260pt panel puts a visible streak across
+      # it. Scaling the whole sheet down averages that away and leaves even
+      # tooth — measured, it is the difference between a grain spread of 0.122
+      # and 0.086, against 0.085 in the system.
+      case "$base" in
+        sticky) sips -c 1367 2048 -s format jpeg -s formatOptions 80 \
+                  --matchTo '/System/Library/ColorSync/Profiles/Generic Gray Profile.icc' \
+                  "$src" --out "$out" > /dev/null 2>&1 ;;
+        *)      sips -Z 2048 -s format jpeg -s formatOptions 80 \
+                  --matchTo '/System/Library/ColorSync/Profiles/Generic Gray Profile.icc' \
+                  "$src" --out "$out" > /dev/null 2>&1 ;;
+      esac
+      echo "Textures: rebuilt $base.jpg"
+    fi
+    cp "$out" "$APP/Contents/Resources/Textures/$base.jpg"
+  done
+  echo "Textures: shipped $(ls -1 "$APP/Contents/Resources/Textures" | wc -l | tr -d ' ') ($(du -sh "$APP/Contents/Resources/Textures" | cut -f1))"
+fi
+
+# Flourish animation: 30 frames of a stop-motion draw-on, split out of one
+# animated SVG and rasterised here.
+#
+# The export stacks all 30 frames in a single file and reveals them in turn with
+# CSS @keyframes on opacity. Nothing in AppKit runs that — no SMIL, no CSS
+# animation, no clock — so rendering the file as it stands draws every frame at
+# once. Each frame is lifted into its own document first, then drawn.
+#
+# Raster, unusually for this branch. The artwork is a single tone, so a template
+# image tinted at draw time still follows the theme, which is the property that
+# made vectors worth the trouble elsewhere. What vectors would cost here is
+# reimplementing SVG mask semantics — the later frames are drawn by masking a
+# full-bleed rect, so the mask carries the shape — and letting the renderer
+# resolve that is exact rather than nearly right. 30 frames come to under 300KB.
+#
+# Cached on the source's modification time; splitting and rendering 30 frames is
+# slow enough to notice on every build.
+ANIM="Art/Vectors/FlourishAnimation.svg"
+if [ -f "$ANIM" ]; then
+  if [ ! -f .animcache/corner/frame-30.png ] || [ "$ANIM" -nt .animcache/corner/frame-30.png ]; then
+    rm -rf .animcache && mkdir -p .animcache/svg .animcache/corner .animcache/folder .animcache/sticky
+    python3 Art/split-frames.py "$ANIM" .animcache/svg > /dev/null
+    # Three sets from one source. The corner mark is upright; the folder tile
+    # and the sticky carry the same drawing rotated, at the angles their static
+    # artwork was baked with — so animating them changes nothing about how they
+    # look, it only lets them draw themselves on.
+    swift Art/render-frames.swift .animcache/svg .animcache/corner 405 0
+    swift Art/render-frames.swift .animcache/svg .animcache/folder 405 134.07
+    swift Art/render-frames.swift .animcache/svg .animcache/sticky 405 147.88
+  fi
+  for set in corner folder sticky; do
+    mkdir -p "$APP/Contents/Resources/FlourishFrames/$set"
+    cp .animcache/$set/frame-*.png "$APP/Contents/Resources/FlourishFrames/$set/"
+  done
+  echo "Flourish: shipped 3 x $(ls -1 .animcache/corner/frame-*.png | wc -l | tr -d ' ') frames ($(du -sh "$APP/Contents/Resources/FlourishFrames" | cut -f1))"
+fi
+
+for arch in arm64 x86_64; do
+  swiftc -O -parse-as-library -swift-version 5 \
+    -target "$arch-apple-macos$DEPLOY_TARGET" \
+    main.swift Theme.swift Texture.swift Onboarding.swift -o "/tmp/jui-$arch"
+done
+lipo -create /tmp/jui-arm64 /tmp/jui-x86_64 -output "$APP/Contents/MacOS/$NAME"
+rm -f /tmp/jui-arm64 /tmp/jui-x86_64
+
+# Extended attributes from downloaded/rendered assets make codesign fail; clear
+# them first, and let a signing failure stop the build rather than shipping an
+# unsigned bundle.
+xattr -cr "$APP"
+codesign --force --sign - "$APP"
+codesign --verify --deep --strict "$APP"
+
+# Ship the zip from here rather than by hand, so it can never go stale against
+# the bundle it's named after.
+#
+# --norsrc --noextattr are load-bearing. The assets carry a com.apple.macl
+# xattr that `xattr -cr` above cannot remove (the kernel owns it), and a plain
+# `ditto -c -k` would archive an AppleDouble "._" companion for every such
+# file. Extracted with anything other than Finder those land *inside* the
+# bundle as real files that aren't in the code seal, and the app then dies with
+# "a sealed resource is missing or invalid" — a launch failure that looks
+# nothing like its cause. Stripping them keeps the archive byte-clean.
+rm -f "$ZIP"
+ditto -c -k --keepParent --norsrc --noextattr "$APP" "$ZIP"
+
+echo "Built $APP build $BUILD_NUMBER ($(lipo -archs "$APP/Contents/MacOS/$NAME"), macOS $DEPLOY_TARGET+, signature verified)"
+echo "Packaged $ZIP ($(du -h "$ZIP" | cut -f1)) — on the receiving Mac: xattr -cr $APP"
+
+# --- stage a copy outside ~/Documents ----------------------------------------
+# Run the staged copy, not the one that was just built here.
+#
+# This repo lives inside ~/Documents, which macOS protects with TCC, and the
+# bundle's own resources — every texture and PNG — are therefore files in a
+# protected folder. Launching the app reads them, so macOS asks permission.
+#
+# Normally that is a one-time question: macOS exempts an app for its own bundle
+# and remembers the answer. Both depend on a stable code-signing identity, and
+# an ad-hoc signature has none — `codesign --sign -` leaves Signature=adhoc with
+# TeamIdentifier not set, and this script re-signs from scratch on every build,
+# so the identity differs each time. The approval has nothing durable to attach
+# to, and the prompt comes back on every single launch.
+#
+# Notarised distribution would fix it properly. Until then the cheap fix is to
+# not run it from a protected folder: verified, the same bundle launched from
+# here never asks. The zip and the bundle in the repo are untouched, so what
+# ships is unchanged.
+STAGE="$HOME/Library/Application Support/$NAME-dev"
+rm -rf "$STAGE/$APP"
+mkdir -p "$STAGE"
+ditto --norsrc --noextattr "$APP" "$STAGE/$APP"
+codesign --verify --deep --strict "$STAGE/$APP"
+echo "Staged $STAGE/$APP"
+echo "  run that one: open \"$STAGE/$APP\""
+
+# --- back up to GitHub -------------------------------------------------------
+# Records every build and pushes it, so the source is never only on this Mac.
+#
+# Nothing here may fail the build: `set -e` is off for this block deliberately.
+# A build with no network, or before `gh auth login` has been run, still
+# succeeds — it just says so and leaves the work committed locally, ready to go
+# up next time. Build products are gitignored, so only source is pushed.
+set +e
+if git rev-parse --git-dir > /dev/null 2>&1; then
+  if [ -z "$(git remote get-url origin 2>/dev/null)" ]; then
+    echo "GitHub: no remote set up yet — skipping."
+  else
+    if [ -n "$(git status --porcelain)" ]; then
+      git add -A
+      CHANGED=$(git diff --cached --name-only | sed 's/^/  /')
+      git commit -q -m "Build $BUILD_NUMBER" -m "Files changed:
+$CHANGED"
+      echo "GitHub: committed build $BUILD_NUMBER."
+    fi
+    if [ -n "$(git log origin/$(git branch --show-current)..HEAD 2>/dev/null)" ] \
+       || ! git rev-parse --verify --quiet "origin/$(git branch --show-current)" > /dev/null; then
+      if git push -q -u origin "$(git branch --show-current)" 2>/dev/null; then
+        echo "GitHub: pushed to $(git remote get-url origin)"
+      else
+        echo "GitHub: push failed — offline, or sign in first with: gh auth login"
+        echo "        Your work is committed locally and will go up on the next build."
+      fi
+    else
+      echo "GitHub: already up to date."
+    fi
+  fi
+fi
+set -e

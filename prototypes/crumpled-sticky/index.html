@@ -1,0 +1,560 @@
+<meta charset="utf-8">
+<title>Crumpled Sticky</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital@0;1&display=swap">
+<style>
+/* Layout: the app's note screen as a phone-sized stage, with tuning controls beside it (below on a phone).
+   Single look on purpose — it is the app's cream paper — so every colour is set here and the mood dots swap them. */
+:root {
+  color-scheme: light;
+  --sheet: #FDF0D9;      /* the page */
+  --panel: #ECDBBE;      /* panel / flourish tint */
+  --ink: #71390D;        /* every word */
+  --sticky: #F7C82D;     /* the stamp */
+  --wash: rgba(247, 200, 45, 0.26);
+  --ground: #E9DCC4;     /* around the phone */
+  --ink-muted: rgba(113, 57, 13, 0.55);
+  --ink-faint: rgba(113, 57, 13, 0.4);
+  --face: "Courier Prime", "Courier New", Courier, monospace;
+  /* the blur, scrim and tick move with the sticky: smooth when fluid, in held frames when stop motion */
+  --dur: .45s;
+  --ease: ease;
+}
+html, body { height: 100%; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font: 14px/1.5 var(--face);
+  padding-inline: 16px;
+  padding-block: 20px;
+  box-sizing: border-box;
+}
+.wrap {
+  display: flex; flex-wrap: wrap; gap: 28px;
+  align-items: flex-start; justify-content: center;
+  max-width: 980px; margin: 0 auto;
+}
+
+/* The phone */
+.phone-slot { flex: 0 0 auto; width: var(--slot-w, 390px); height: var(--slot-h, 760px); }
+.stage {
+  position: relative; width: 390px; height: 760px;
+  transform-origin: top left; transform: scale(var(--s, 1));
+  border-radius: 44px; overflow: hidden;
+  background: var(--sheet);
+  box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 18px 50px rgba(80, 50, 10, .18);
+  cursor: default; user-select: none; -webkit-user-select: none;
+  touch-action: manipulation;
+}
+.page { position: absolute; inset: 0; transition: filter var(--dur) var(--ease); }
+.page::before { /* the paper, multiplied into the sheet colour */
+  content: ""; position: absolute; inset: 0;
+  background: url(assets/sheet.jpg) center / cover;
+  mix-blend-mode: multiply; opacity: .5;
+}
+.page::after { /* the ruling: black at 10%, a 48pt pitch */
+  content: ""; position: absolute; left: 12px; right: 12px; top: 52px; bottom: 0;
+  background: repeating-linear-gradient(to bottom, transparent 0 47px, rgba(0,0,0,.1) 47px 48px);
+}
+.status { position: absolute; top: 18px; left: 34px; right: 30px; display: flex; justify-content: space-between;
+  font: 600 15px/1 -apple-system, system-ui, sans-serif; color: #1b1b1b; z-index: 2; }
+.back { position: absolute; top: 58px; left: 18px; width: 16px; height: 22px; z-index: 2;
+  border-left: 2px solid var(--ink-muted); border-bottom: 2px solid var(--ink-muted);
+  transform: rotate(45deg) scale(.55); transform-origin: center; border-radius: 1px; }
+.text {
+  position: absolute; top: 52px; left: 35px; right: 35px; z-index: 1;
+  font: 16px/48px var(--face); color: var(--ink); white-space: pre-wrap;
+}
+/* The ball's place in the line: right after the words it belongs to, with the
+   sentence running on after it. Empty while the sticky is out, so nothing reflows. */
+.slot { display: inline-block; width: 30px; height: 24px; vertical-align: middle; }
+.wash { background: var(--wash); border-radius: 3px; padding: 4px 2px; margin: 0 -2px; }
+.count { position: absolute; right: 22px; bottom: 30px; font: 14px/1 var(--face); color: var(--ink-faint); z-index: 1; }
+.page.blurred { filter: blur(8px); }
+.scrim { position: absolute; inset: 0; background: var(--sheet); opacity: 0; transition: opacity var(--dur) var(--ease); pointer-events: none; }
+.scrim.on { opacity: .55; }
+canvas.gl { position: absolute; inset: 0; width: 390px; height: 760px; pointer-events: none; }
+.tick {
+  position: absolute; width: 44px; height: 44px; left: calc(50% - 22px);
+  background: var(--ink-muted);
+  -webkit-mask: url(assets/check.svg) center / 22px 20px no-repeat;
+  mask: url(assets/check.svg) center / 22px 20px no-repeat;
+  opacity: 0; transform: scale(.8); transition: opacity .2s var(--tick-ease, ease), transform .2s var(--tick-ease, ease);
+  border: 0; padding: 0; cursor: pointer;
+}
+.tick.on { opacity: 1; transform: scale(1); }
+.hint { position: absolute; left: 0; right: 0; bottom: 64px; text-align: center; font: 12px/1.4 var(--face);
+  color: var(--ink-faint); transition: opacity .3s; z-index: 1; }
+
+/* Controls */
+.panel {
+  flex: 1 1 280px; max-width: 380px; min-width: 0;
+  display: grid; gap: 22px; padding-top: 8px;
+}
+.panel h1 { font: 700 20px/1.2 var(--face); margin: 0; letter-spacing: -.01em; text-wrap: balance; }
+.panel p { margin: 0; color: var(--ink-muted); }
+.group { display: grid; gap: 10px; }
+.label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button.chip {
+  font: 14px/1 var(--face); color: var(--ink); background: transparent;
+  border: 1px solid rgba(113,57,13,.25); border-radius: 999px; padding: 9px 14px; cursor: pointer;
+}
+button.chip[aria-pressed="true"] { background: var(--panel); border-color: transparent; }
+button.chip:focus-visible, .dot:focus-visible, .tick:focus-visible, input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+button.primary { background: var(--ink); color: var(--sheet); border-color: transparent; }
+input[type=range] { width: 100%; accent-color: var(--ink); margin: 0; }
+.slider { display: grid; gap: 6px; }
+.slider-head { display: flex; justify-content: space-between; align-items: baseline; }
+.slider output { font-size: 13px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.slider .ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-faint); }
+.stop-only[hidden] { display: none; }
+.dots { display: flex; gap: 14px; }
+.dot { width: 22px; height: 22px; border-radius: 50%; border: 1.2px solid; cursor: pointer; padding: 0; transition: transform .15s; }
+.dot[aria-pressed="true"] { transform: scale(1.4); }
+.note { font-size: 12px; color: var(--ink-faint); }
+@media (prefers-reduced-motion: reduce) { .page, .scrim, .tick { transition: none; } }
+</style>
+
+<div class="wrap">
+  <div class="phone-slot" id="slot">
+    <div class="stage" id="stage" aria-label="Prototype: a note with a crumpled sticky tucked in beside its words">
+      <div class="page" id="page">
+        <div class="status"><span>9:41</span><span>●●● ▮</span></div>
+        <div class="back" aria-hidden="true"></div>
+        <div class="text">Dear diary,
+
+The first page of a new notebook always feels like a promise, written in brown ink on <span class="wash">cream paper</span>&nbsp;<span class="slot" id="slot-ball" aria-hidden="true"></span> from the shop by the station.
+
+And that is enough for today.</div>
+        <div class="count">31</div>
+      </div>
+      <div class="scrim" id="scrim"></div>
+      <canvas class="gl" id="gl"></canvas>
+      <button class="tick" id="tick" aria-label="Done"></button>
+      <div class="hint" id="hint">tap the crumpled ball beside "cream paper"</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="group">
+      <h1>Crumpled sticky</h1>
+      <p>Closed, the sticky is a crumpled ball tucked into the line right after the words it is about, with the sentence carrying on after it. Tap it: it lifts, comes to the middle and opens out flat. Tap outside the stamp, or the tick, and it crushes back into a ball and drops back into its place in the line.</p>
+    </div>
+    <div class="group">
+      <span class="label">Try it</span>
+      <div class="row">
+        <button class="chip primary" id="toggle">Open the sticky</button>
+      </div>
+    </div>
+    <div class="group">
+      <span class="label">Motion</span>
+      <div class="row" role="group" aria-label="Motion">
+        <button class="chip" data-mode="fluid" aria-pressed="true">Fluid</button>
+        <button class="chip" data-mode="stop" aria-pressed="false">Stop motion</button>
+      </div>
+      <p class="note" id="mode-note">Every screen refresh draws a new pose, so the paper glides.</p>
+    </div>
+    <div class="group slider">
+      <div class="slider-head"><label class="label" for="speed">Speed</label><output id="speed-out" for="speed">1.0×</output></div>
+      <input type="range" id="speed" min="0.25" max="2" step="0.05" value="1">
+      <div class="ends"><span>slow</span><span>quick</span></div>
+    </div>
+    <div class="group slider stop-only" hidden>
+      <div class="slider-head"><label class="label" for="fps">Frame rate</label><output id="fps-out" for="fps">12 fps</output></div>
+      <input type="range" id="fps" min="4" max="24" step="1" value="12">
+      <div class="ends"><span>choppy</span><span>smoother</span></div>
+    </div>
+    <div class="group slider stop-only" hidden>
+      <div class="slider-head"><label class="label" for="wobble">Handmade wobble</label><output id="wobble-out" for="wobble">50%</output></div>
+      <input type="range" id="wobble" min="0" max="1" step="0.01" value="0.5">
+      <div class="ends"><span>still</span><span>restless</span></div>
+    </div>
+    <div class="group">
+      <label class="label" for="creases">Crease depth</label>
+      <input type="range" id="creases" min="0" max="1" step="0.01" value="0.8">
+    </div>
+    <div class="group">
+      <span class="label">Mood</span>
+      <div class="dots" id="dots" role="group" aria-label="Mood"></div>
+    </div>
+    <p class="note">A prototype, not the app. The real paper texture, Courier Prime and flourish are the app's own; the ball is a sheet of a few thousand points that the animation bends between crumpled and flat, so the light catches the creases.</p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  // ---- The app's six moods (Theme.swift) --------------------------------
+  const MOODS = {
+    cream:  { sheet: "#FDF0D9", panel: "#ECDBBE", ink: "#71390D", sticky: "#F7C82D", openDot: "#A88D34", ground: "#E9DCC4" },
+    mint:   { sheet: "#DDF9EF", panel: "#C3E7DA", ink: "#176742", sticky: "#61E7C1", openDot: "#409C82", ground: "#C9E8DC" },
+    sky:    { sheet: "#D9F1FD", panel: "#BEDCEC", ink: "#0D5A71", sticky: "#65BFFF", openDot: "#3478A8", ground: "#C5DFEC" },
+    coral:  { sheet: "#FDE3D9", panel: "#ECCBBE", ink: "#711F0D", sticky: "#FF985E", openDot: "#A85E34", ground: "#ECCFC3" },
+    lilac:  { sheet: "#E6D9FD", panel: "#CFBEEC", ink: "#270D71", sticky: "#C18FFF", openDot: "#6834A8", ground: "#D4C6EC" },
+    orchid: { sheet: "#FDD9F8", panel: "#ECBEE6", ink: "#710D6E", sticky: "#FF87E5", openDot: "#A8348F", ground: "#ECC5E6" },
+  };
+  let mood = MOODS.cream;
+
+  const W = 390, H = 760;                 // the stage, in points
+  const SIDE = 280;                       // the stamp, as in the app
+  const NOTE = "remember to buy more of\nthe good paper — the heavy\ncream one from the shop\nby the station.";
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const stage = document.getElementById("stage");
+  const slot = document.getElementById("slot");
+  const page = document.getElementById("page");
+  const scrim = document.getElementById("scrim");
+  const tick = document.getElementById("tick");
+  const hint = document.getElementById("hint");
+  const toggle = document.getElementById("toggle");
+  const creaseInput = document.getElementById("creases");
+
+  // ---- Fit the phone to the window --------------------------------------
+  function fit() {
+    const availW = Math.min(390, document.documentElement.clientWidth - 32);
+    const availH = Math.max(420, window.innerHeight - 40);
+    const s = Math.min(1, availW / W, availH / H);
+    stage.style.setProperty("--s", s);
+    slot.style.setProperty("--slot-w", W * s + "px");
+    slot.style.setProperty("--slot-h", H * s + "px");
+    return s;
+  }
+  let scale = fit();
+
+  if (!window.THREE) {
+    hint.textContent = "This prototype needs WebGL, which this browser didn't load.";
+    return;
+  }
+
+  // ---- Three.js: an orthographic camera in stage points -----------------
+  const canvas = document.getElementById("gl");
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  function sizeRenderer() {
+    renderer.setPixelRatio(Math.min(3, (window.devicePixelRatio || 1) * scale));
+    renderer.setSize(W, H, false);
+  }
+  sizeRenderer();
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(-W / 2, W / 2, H / 2, -H / 2, -2000, 2000);
+  camera.position.z = 1000;
+  scene.add(new THREE.AmbientLight(0xffffff, 0.62));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+  sun.position.set(-0.4, 0.6, 1);
+  scene.add(sun);
+
+  // ---- Perlin noise, for the creases ------------------------------------
+  const perm = new Uint8Array(512);
+  { const p = [...Array(256).keys()]; let seed = 7;
+    for (let i = 255; i > 0; i--) { seed = (seed * 16807) % 2147483647; const j = seed % (i + 1); [p[i], p[j]] = [p[j], p[i]]; }
+    for (let i = 0; i < 512; i++) perm[i] = p[i & 255]; }
+  const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  function grad(h, x, y, z) { const u = h < 8 ? x : y, v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+    return ((h & 1) ? -u : u) + ((h & 2) ? -v : v); }
+  function noise(x, y, z) {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+    const u = fade(x), v = fade(y), w = fade(z);
+    const A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z, B = perm[X + 1] + Y, BA = perm[B] + Z, BB = perm[B + 1] + Z;
+    return lerp(lerp(lerp(grad(perm[AA] & 15, x, y, z), grad(perm[BA] & 15, x - 1, y, z), u),
+                     lerp(grad(perm[AB] & 15, x, y - 1, z), grad(perm[BB] & 15, x - 1, y - 1, z), u), v),
+                lerp(lerp(grad(perm[AA + 1] & 15, x, y, z - 1), grad(perm[BA + 1] & 15, x - 1, y, z - 1), u),
+                     lerp(grad(perm[AB + 1] & 15, x, y - 1, z - 1), grad(perm[BB + 1] & 15, x - 1, y - 1, z - 1), u), v), w);
+  }
+  // Ridged: sharp lines where the noise crosses zero — fold lines.
+  const ridge = (x, y, z) => { const n = 1 - Math.abs(noise(x, y, z)); return n * n; };
+
+  // ---- The sheet ---------------------------------------------------------
+  const SEG = 56;
+  const geometry = new THREE.PlaneGeometry(SIDE, SIDE, SEG, SEG);
+  const pos = geometry.attributes.position;
+  const count = pos.count;
+  const flat = new Float32Array(pos.array);       // the stamp, laid flat
+  const ball = new Float32Array(count * 3);       // the same points, crumpled
+  const delay = new Float32Array(count);          // when each point starts to open
+  const wrinkle = new Float32Array(count);        // creases left in the paper as it flattens
+  const boil = new Float32Array(count);           // stop motion: this frame's handling of the paper
+  const jit = { x: 0, y: 0, rz: 0, s: 0 };        // stop motion: where the hand left it this frame
+  const R = 58;                                   // the ball's radius before it is scaled down
+
+  function buildBall(depth) {
+    for (let i = 0; i < count; i++) {
+      const x = flat[i * 3], y = flat[i * 3 + 1];
+      const u = x / (SIDE / 2), v = y / (SIDE / 2);
+      const r = Math.min(1, Math.hypot(u, v) / Math.SQRT2);
+      // Gathered like a handkerchief: the middle of the sheet faces out,
+      // the edges are drawn round to the back, with a twist as they go.
+      const theta = Math.atan2(v, u) + r * 1.4;
+      const alpha = r * Math.PI * 0.93;
+      const dx = Math.sin(alpha) * Math.cos(theta), dy = Math.sin(alpha) * Math.sin(theta), dz = Math.cos(alpha);
+      const lump = 1 + 0.14 * noise(dx * 1.6 + 3.1, dy * 1.6, dz * 1.6);
+      const crease = (ridge(dx * 2.6, dy * 2.6, dz * 2.6) * 0.62 + ridge(dx * 5.3 + 9, dy * 5.3, dz * 5.3) * 0.38) - 0.5;
+      const radius = R * (lump + crease * 0.42 * depth);
+      ball[i * 3] = dx * radius; ball[i * 3 + 1] = dy * radius; ball[i * 3 + 2] = dz * radius;
+      delay[i] = r * 0.32;
+      wrinkle[i] = (ridge(u * 2.2 + 4, v * 2.2, 1.7) * 0.7 + ridge(u * 4.4, v * 4.4 + 2, 5.1) * 0.3 - 0.45) * 26 * depth;
+    }
+  }
+  buildBall(+creaseInput.value);
+
+  // ---- The stamp, drawn the way StickyCard draws it ----------------------
+  const TEX = 1024, k = TEX / SIDE;
+  function stampPath(ctx) {
+    ctx.beginPath(); ctx.rect(0, 0, TEX, TEX);
+    const radius = 4 * k, pitch = 15 * k, gap = 6 * k;
+    const punch = (len, at) => { const usable = len - gap * 2, n = Math.max(1, Math.round(usable / pitch)), step = usable / n;
+      for (let i = 0; i < n; i++) { const [cx, cy] = at(gap + (i + 0.5) * step); ctx.moveTo(cx + radius, cy); ctx.arc(cx, cy, radius, 0, Math.PI * 2); } };
+    punch(TEX, s => [s, 0]); punch(TEX, s => [s, TEX]); punch(TEX, s => [0, s]); punch(TEX, s => [TEX, s]);
+  }
+  const images = {};
+  const load = src => new Promise((ok, fail) => { const im = new Image(); im.onload = () => ok(im); im.onerror = fail; im.src = src; });
+
+  function paperSide(withWriting) {
+    const c = document.createElement("canvas"); c.width = c.height = TEX;
+    const ctx = c.getContext("2d");
+    ctx.save(); stampPath(ctx); ctx.clip("evenodd");
+    ctx.fillStyle = mood.sticky; ctx.fillRect(0, 0, TEX, TEX);
+    if (images.grain) { // the sticky stock at 46%, a window onto it at its own scale
+      ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = 0.46;
+      const gw = images.grain.width * 0.5 * k, gh = images.grain.height * 0.5 * k;
+      ctx.drawImage(images.grain, (TEX - gw) / 2, (TEX - gh) / 2, gw, gh);
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+    }
+    if (withWriting && images.flourish) { // panel, multiplied through the gold
+      const fw = SIDE * 0.30 * k, fh = fw * images.flourish.height / images.flourish.width;
+      const t = document.createElement("canvas"); t.width = fw; t.height = fh;
+      const tc = t.getContext("2d"); tc.drawImage(images.flourish, 0, 0, fw, fh);
+      tc.globalCompositeOperation = "source-in"; tc.fillStyle = mood.panel; tc.fillRect(0, 0, fw, fh);
+      ctx.globalCompositeOperation = "multiply";
+      ctx.drawImage(t, SIDE * (1.0315 - 0.30) * k, TEX - fh + SIDE * 0.0575 * k);
+      ctx.globalCompositeOperation = "source-over";
+    }
+    if (withWriting) {
+      ctx.fillStyle = mood.ink; ctx.font = `${14 * k}px "Courier Prime", "Courier New", monospace`;
+      ctx.textBaseline = "middle";
+      NOTE.split("\n").forEach((line, i) => ctx.fillText(line, 20 * k, (22 + 10 + i * 20) * k));
+    }
+    ctx.restore();
+    const texture = new THREE.CanvasTexture(c);
+    texture.encoding = THREE.sRGBEncoding;
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return texture;
+  }
+
+  const front = new THREE.MeshPhongMaterial({ side: THREE.FrontSide, flatShading: true, transparent: true, alphaTest: 0.5, shininess: 6, specular: 0x0b0b0b });
+  const back = new THREE.MeshPhongMaterial({ side: THREE.BackSide, flatShading: true, transparent: true, alphaTest: 0.5, shininess: 6, specular: 0x0b0b0b });
+  function paint() {
+    front.map?.dispose(); back.map?.dispose();
+    front.map = paperSide(true); back.map = paperSide(false);
+    front.needsUpdate = back.needsUpdate = true;
+  }
+  const group = new THREE.Group();
+  group.add(new THREE.Mesh(geometry, front), new THREE.Mesh(geometry, back));
+  scene.add(group);
+
+  // A soft shadow under the open stamp.
+  const shadowCanvas = document.createElement("canvas"); shadowCanvas.width = shadowCanvas.height = 128;
+  { const g = shadowCanvas.getContext("2d"); const gr = g.createRadialGradient(64, 64, 10, 64, 64, 64);
+    gr.addColorStop(0, "rgba(60,35,5,0.28)"); gr.addColorStop(1, "rgba(60,35,5,0)"); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); }
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(SIDE * 1.25, SIDE * 1.25),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(shadowCanvas), transparent: true, depthWrite: false }));
+  shadow.position.z = -300; scene.add(shadow);
+
+  // ---- Where things sit ---------------------------------------------------
+  // Stage points, y down → scene, y up, origin at the centre.
+  const toScene = (x, y) => new THREE.Vector2(x - W / 2, H / 2 - y);
+  const BALL_PX = 24;                                   // the ball in the line, a little over the type's height
+  // Where the ball sits: the middle of its slot in the line, measured off the
+  // page (in stage points), and again whenever the type or the window changes.
+  const ballSlot = document.getElementById("slot-ball");
+  const marginSpot = new THREE.Vector2();
+  function placeBall() {
+    const s = stage.getBoundingClientRect(), r = ballSlot.getBoundingClientRect();
+    marginSpot.copy(toScene((r.left + r.width / 2 - s.left) / scale, (r.top + r.height / 2 - s.top) / scale));
+  }
+  placeBall();
+  const openSpot = toScene(W / 2, H / 2);               // dead centre
+  const closedScale = BALL_PX / (R * 2);
+
+  // ---- Easing -------------------------------------------------------------
+  const clamp01 = t => Math.max(0, Math.min(1, t));
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+  const easeInOutCubic = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+  // ---- Pose at a point in the animation: 0 = ball in the margin, 1 = open --
+  function pose(T, time) {
+    const travel = easeOutCubic(clamp01(T / 0.42));
+    const unfold = clamp01((T - 0.26) / 0.74);
+    const a = pos.array;
+    for (let i = 0; i < count; i++) {
+      const p = easeInOutCubic(clamp01((unfold - delay[i]) / (1 - 0.32)));
+      const settle = 4 * p * (1 - p);                 // creases linger mid-way, gone when flat
+      const b = 1 + boil[i];                          // the ball, squeezed a little differently each frame
+      a[i * 3]     = lerp(ball[i * 3] * b,     flat[i * 3],     p);
+      a[i * 3 + 1] = lerp(ball[i * 3 + 1] * b, flat[i * 3 + 1], p);
+      a[i * 3 + 2] = lerp(ball[i * 3 + 2] * b, flat[i * 3 + 2], p) + (wrinkle[i] + boil[i] * 110) * settle;
+    }
+    pos.needsUpdate = true;
+    const at = new THREE.Vector2().lerpVectors(marginSpot, openSpot, travel);
+    const lift = Math.sin(travel * Math.PI) * 46;      // an arc on the way
+    group.position.set(at.x + jit.x, at.y + lift + jit.y, 0);
+    const s = lerp(closedScale, 1, travel);
+    group.scale.setScalar(s * (1 + jit.s));
+    const tumble = 1 - unfold;
+    group.rotation.set(tumble * 0.55 + (1 - travel) * 0.2 * Math.sin(time * 0.0012),
+                       tumble * (0.9 + (1 - travel) * 1.6),
+                       tumble * -0.5 + jit.rz);
+    shadow.position.set(openSpot.x + 4, openSpot.y - 10, -300);
+    shadow.material.opacity = clamp01((unfold - 0.6) / 0.4);
+  }
+
+  // ---- State ----------------------------------------------------------------
+  let T = 0, target = 0, speed = 1, last = performance.now();
+  const OPEN_SECONDS = 1.15, CLOSE_SECONDS = 0.95;
+
+  // ---- Motion: fluid draws every refresh; stop motion holds each pose for a
+  // whole frame, and between frames the paper is "handled" — re-squeezed a
+  // little and set down a hair off — the way it would be between shots.
+  let mode = "fluid", fps = 12, wobble = 0.5;
+  let shownT = 0, shownTime = 0, lastShot = 0, seed = 0, handled = false;
+
+  function handle(amount) {
+    seed += 1;
+    const z = seed * 1.37;
+    for (let i = 0; i < count; i++) {
+      const u = flat[i * 3] / (SIDE / 2), v = flat[i * 3 + 1] / (SIDE / 2);
+      boil[i] = (noise(u * 1.9 + 11, v * 1.9, z) * 0.7 + noise(u * 4.3, v * 4.3 + 5, z + 4) * 0.3) * 0.11 * amount;
+    }
+    const r = () => Math.random() * 2 - 1;
+    jit.x = r() * 1.8 * amount; jit.y = r() * 1.8 * amount;
+    jit.rz = r() * 0.035 * amount; jit.s = r() * 0.02 * amount;
+    handled = true;
+  }
+  function setDown() { // at rest: no hand on it
+    if (!handled) return;
+    boil.fill(0); jit.x = jit.y = jit.rz = jit.s = 0; handled = false;
+  }
+
+  // The blur and scrim move with the sticky: eased when fluid, stepped at the
+  // frame rate when stop motion, both scaled by the speed.
+  function syncPageMotion() {
+    const root = document.documentElement.style, dur = 0.45 / speed;
+    root.setProperty("--dur", dur.toFixed(3) + "s");
+    root.setProperty("--ease", mode === "stop" ? `steps(${Math.max(1, Math.round(dur * fps))}, end)` : "ease");
+    root.setProperty("--tick-ease", mode === "stop" ? `steps(${Math.max(1, Math.round(0.2 * fps))}, end)` : "ease");
+  }
+
+  function setOpen(open) {
+    target = open ? 1 : 0;
+    page.classList.toggle("blurred", open);
+    scrim.classList.toggle("on", open);
+    tick.classList.remove("on");
+    hint.style.opacity = open ? 0 : 1;
+    toggle.textContent = open ? "Crumple it" : "Open the sticky";
+    if (reduceMotion) T = target;
+  }
+
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (T !== target) {
+      const step = dt * speed / (target > T ? OPEN_SECONDS : CLOSE_SECONDS);
+      T = target > T ? Math.min(target, T + step) : Math.max(target, T - step);
+    }
+    if (mode === "fluid") {
+      setDown();
+      shownT = T; shownTime = now;
+      pose(shownT, shownTime);
+    } else if (now - lastShot >= 1000 / fps - 1) { // the next frame of film
+      lastShot = now;
+      shownT = T; shownTime = now;
+      if (shownT > 0 && shownT < 1) handle(wobble); else setDown();
+      pose(shownT, shownTime);
+    }
+    if (shownT === 1 && target === 1 && !tick.classList.contains("on")) {
+      const top = H / 2 - SIDE / 2;
+      tick.style.top = (top + SIDE + 14) + "px";
+      tick.classList.add("on");
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+
+  // ---- Input ------------------------------------------------------------------
+  function stagePoint(e) {
+    const r = stage.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+  }
+  stage.addEventListener("click", e => {
+    if (e.target === tick) return;
+    const p = stagePoint(e);
+    if (target === 0) {
+      const m = { x: marginSpot.x + W / 2, y: H / 2 - marginSpot.y };
+      if (Math.hypot(p.x - m.x, p.y - m.y) < 26) setOpen(true);
+    } else {
+      const inCard = Math.abs(p.x - W / 2) < SIDE / 2 && Math.abs(p.y - H / 2) < SIDE / 2;
+      if (!inCard) setOpen(false);
+    }
+  });
+  tick.addEventListener("click", () => setOpen(false));
+  toggle.addEventListener("click", () => setOpen(target === 0));
+  const modeNote = document.getElementById("mode-note");
+  const MODE_NOTES = {
+    fluid: "Every screen refresh draws a new pose, so the paper glides.",
+    stop: "Each pose is held for a whole frame, and between frames the paper is handled a little differently — the creases shift and it lands a hair off — as if it were moved by hand between shots.",
+  };
+  document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll("[data-mode]").forEach(o => o.setAttribute("aria-pressed", String(o === b)));
+    document.querySelectorAll(".stop-only").forEach(el => el.hidden = mode !== "stop");
+    modeNote.textContent = MODE_NOTES[mode];
+    lastShot = 0;
+    syncPageMotion();
+  }));
+  const slider = (id, out, format, set) => {
+    const input = document.getElementById(id), output = document.getElementById(out);
+    const apply = () => { set(+input.value); output.textContent = format(+input.value); syncPageMotion(); };
+    input.addEventListener("input", apply); apply();
+  };
+  slider("speed", "speed-out", v => v.toFixed(2).replace(/0$/, "") + "×", v => speed = v);
+  slider("fps", "fps-out", v => v + " fps", v => fps = v);
+  slider("wobble", "wobble-out", v => Math.round(v * 100) + "%", v => wobble = v);
+  creaseInput.addEventListener("input", () => buildBall(+creaseInput.value));
+
+  // ---- Moods ----------------------------------------------------------------
+  const dots = document.getElementById("dots");
+  Object.entries(MOODS).forEach(([name, m]) => {
+    const d = document.createElement("button");
+    d.className = "dot"; d.style.background = m.sticky; d.style.borderColor = m.openDot;
+    d.setAttribute("aria-label", name); d.setAttribute("aria-pressed", String(name === "cream"));
+    d.addEventListener("click", () => {
+      mood = m;
+      const root = document.documentElement.style;
+      root.setProperty("--sheet", m.sheet); root.setProperty("--panel", m.panel);
+      root.setProperty("--ink", m.ink); root.setProperty("--sticky", m.sticky);
+      root.setProperty("--ground", m.ground);
+      const hex = m.ink.slice(1), rgb = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16)).join(",");
+      root.setProperty("--ink-muted", `rgba(${rgb},0.55)`); root.setProperty("--ink-faint", `rgba(${rgb},0.4)`);
+      const sh = m.sticky.slice(1), srgb = [0, 2, 4].map(i => parseInt(sh.slice(i, i + 2), 16)).join(",");
+      root.setProperty("--wash", `rgba(${srgb},0.26)`);
+      dots.querySelectorAll(".dot").forEach(o => o.setAttribute("aria-pressed", String(o === d)));
+      paint();
+    });
+    dots.appendChild(d);
+  });
+
+  window.addEventListener("resize", () => { scale = fit(); sizeRenderer(); placeBall(); });
+
+  // ---- Start: paint once the paper, flourish and typeface are in -----------
+  paint();
+  requestAnimationFrame(frame);
+  Promise.allSettled([
+    load("assets/sticky.jpg").then(im => images.grain = im),
+    load("assets/flourish-sticky.png").then(im => images.flourish = im),
+    document.fonts ? document.fonts.load('14px "Courier Prime"') : null,
+  ]).then(() => { placeBall(); paint(); });
+  if (document.fonts) document.fonts.ready.then(placeBall); // the type settles the line
+})();
+</script>

@@ -1,0 +1,4 @@
+Snapshot of the macOS re-JUI app, taken 2026-10-07 22:19.
+Branch: re-JUI  HEAD: 990950eefc5debcf409fea597f7b7b180cc06db5
+Plus uncommitted working-tree changes (diff sha1: db53a153928d).
+Reference only — not compiled into the iOS app.
