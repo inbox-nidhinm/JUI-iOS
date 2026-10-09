@@ -1,11 +1,12 @@
 # JUI for iPhone
 
-The iPhone port of **re-JUI**, the macOS writing pad built as a gift for Juilee —
+The iPhone port of **JUI** (called re-JUI until 2026-10-10, when it replaced the
+original), the macOS writing pad built as a gift for Juilee —
 a cream sheet, Courier, a ruled page and no chrome. How it *feels* matters more
 than feature count.
 
 **The macOS app is the source of truth, and it lives somewhere else.** It is at
-`~/Documents/Claude Code/JUI` (branch `re-JUI`) and is worked on by a different
+`~/Documents/Claude Code/JUI` (branch `main`) and is worked on by a different
 Claude Code session. Never write to that folder. `mac-reference/` holds a
 read-only snapshot of its sources and notes (see `mac-reference/SNAPSHOT.txt`
 for exactly which version); its `CLAUDE.md` and `CHANGELOG.md` explain *why*
@@ -16,7 +17,7 @@ anything that was ported from it.
 
 - **iPhone only**, portrait, iOS 17+, light appearance only.
 - **Notes live in a folder the reader picks — in practice `iCloud Drive/JUI
-  Notes`, shared with the Mac's re-JUI** (whose `vaultPath` points at the same
+  Notes`, shared with the Mac's JUI** (whose `vaultPath` points at the same
   folder), so the two apps read the same files and iCloud syncs them. Free
   signing allows no app iCloud container, so this is a plain iCloud Drive
   folder chosen once in settings (`fileImporter`) and reopened from a
