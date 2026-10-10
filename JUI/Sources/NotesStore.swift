@@ -18,7 +18,9 @@ struct SearchHit: Identifiable {
 // An annotation anchored to a character range of the note, not to pixels.
 // Same file format as the Mac app, so a vault copied between the two keeps its
 // stickies. The phone shows every sticky as a mark in the margin and never
-// pins one, but it keeps pinX/pinY/rotation/left as it found them.
+// pins one, but it keeps pinX/pinY/rotation/left as it found them — and
+// `created`, the day the Mac stamps on a sticky's card, which the phone doesn't
+// show yet but must not drop when it rewrites the file.
 struct Sticky: Identifiable, Codable, Equatable {
     let id: UUID
     var start: Int
@@ -28,6 +30,7 @@ struct Sticky: Identifiable, Codable, Equatable {
     var pinY: Double?
     var rotation: Double?
     var left: Bool?
+    var created: Date?
 }
 
 // The single source of truth for everything. Every view takes `store`
@@ -203,7 +206,8 @@ final class NotesStore: ObservableObject {
 
     @discardableResult
     func addSticky(range: NSRange) -> UUID {
-        let sticky = Sticky(id: UUID(), start: range.location, length: range.length, text: "")
+        let sticky = Sticky(id: UUID(), start: range.location, length: range.length, text: "",
+                            created: Date())
         stickies.append(sticky)
         scheduleSave()
         return sticky.id
